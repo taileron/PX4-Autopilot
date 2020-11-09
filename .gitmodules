@@ -67,3 +67,6 @@
 	path = src/drivers/uavcan_v1/legacy_data_types
 	url = https://github.com/px4/public_regulated_data_types/
 	branch = legacy
+[submodule "src/lib/events/libevents"]
+	path = src/lib/events/libevents
+	url = https://github.com/mavlink/libevents.git

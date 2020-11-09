@@ -31,6 +31,8 @@
 #
 ############################################################################
 
+px4_add_git_submodule(TARGET git_libevents PATH "libevents")
+
 get_property(all_px4_src_files GLOBAL PROPERTY PX4_SRC_FILES)
 
 set(generated_events_dir ${PX4_BINARY_DIR}/events)

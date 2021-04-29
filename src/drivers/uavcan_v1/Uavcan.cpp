@@ -346,6 +346,10 @@ void UavcanNode::print_info()
 		subscriber->printInfo();
 	}
 
+	for (auto &subscriber : _dynsubscribers) {
+		subscriber->printInfo();
+	}
+
 	_mixing_output.printInfo();
 	_esc_controller.printInfo();
 

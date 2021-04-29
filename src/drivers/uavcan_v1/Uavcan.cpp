@@ -277,7 +277,7 @@ void UavcanNode::Run()
 
 	/* FIXME this flawed we've to go through the whole loop to get the next frame in the buffer  */
 
-	if (_can_interface->receive(&received_frame) > 0) {
+	while (_can_interface->receive(&received_frame) > 0) {
 
 		CanardTransfer receive{};
 		int32_t result = canardRxAccept(&_canard_instance, &received_frame, 0, &receive);

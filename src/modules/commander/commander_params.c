@@ -296,7 +296,7 @@ PARAM_DEFINE_INT32(COM_LOW_BAT_ACT, 0);
  * @max 25.0
  * @decimal 3
  */
-PARAM_DEFINE_FLOAT(COM_BAT_ACT_T, 10.0f);
+PARAM_DEFINE_FLOAT(COM_BAT_ACT_T, 5.f);
 
 /**
  * Imbalanced propeller failsafe mode
@@ -927,7 +927,7 @@ PARAM_DEFINE_INT32(COM_PREARM_MODE, 0);
 /**
  * Enable force safety
  *
- * Force safety when the vehicle disarms. Not supported when safety button used over PX4IO board.
+ * Force safety when the vehicle disarms
  *
  * @boolean
  * @group Commander

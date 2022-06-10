@@ -86,13 +86,13 @@ public:
 	void getEvVelPosInnovVar(float hvel[2], float &vvel, float hpos[2], float &vpos) const;
 	void getEvVelPosInnovRatio(float &hvel, float &vvel, float &hpos, float &vpos) const;
 
-	void getBaroHgtInnov(float &baro_hgt_innov) const { baro_hgt_innov = _baro_hgt_innov; }
-	void getBaroHgtInnovVar(float &baro_hgt_innov_var) const { baro_hgt_innov_var = _baro_hgt_innov_var; }
-	void getBaroHgtInnovRatio(float &baro_hgt_innov_ratio) const { baro_hgt_innov_ratio = _baro_hgt_test_ratio; }
+	void getBaroHgtInnov(float &baro_hgt_innov) const { baro_hgt_innov = _aid_src_baro_hgt.innovation; }
+	void getBaroHgtInnovVar(float &baro_hgt_innov_var) const { baro_hgt_innov_var = _aid_src_baro_hgt.innovation_variance; }
+	void getBaroHgtInnovRatio(float &baro_hgt_innov_ratio) const { baro_hgt_innov_ratio = _aid_src_baro_hgt.test_ratio; }
 
-	void getRngHgtInnov(float &rng_hgt_innov) const { rng_hgt_innov = _rng_hgt_innov; }
-	void getRngHgtInnovVar(float &rng_hgt_innov_var) const { rng_hgt_innov_var = _rng_hgt_innov_var; }
-	void getRngHgtInnovRatio(float &rng_hgt_innov_ratio) const { rng_hgt_innov_ratio = _rng_hgt_test_ratio; }
+	void getRngHgtInnov(float &rng_hgt_innov) const { rng_hgt_innov = _aid_src_rng_hgt.innovation; }
+	void getRngHgtInnovVar(float &rng_hgt_innov_var) const { rng_hgt_innov_var = _aid_src_rng_hgt.innovation_variance; }
+	void getRngHgtInnovRatio(float &rng_hgt_innov_ratio) const { rng_hgt_innov_ratio = _aid_src_rng_hgt.test_ratio; }
 
 	void getAuxVelInnov(float aux_vel_innov[2]) const;
 	void getAuxVelInnovVar(float aux_vel_innov[2]) const;
@@ -338,12 +338,18 @@ public:
 	bool getDataEKFGSF(float *yaw_composite, float *yaw_variance, float yaw[N_MODELS_EKFGSF],
 			   float innov_VN[N_MODELS_EKFGSF], float innov_VE[N_MODELS_EKFGSF], float weight[N_MODELS_EKFGSF]);
 
+	// Returns true if the output of the yaw emergency estimator can be used for a reset
+	bool isYawEmergencyEstimateAvailable() const;
+
 	const BaroBiasEstimator::status &getBaroBiasEstimatorStatus() const { return _baro_b_est.getStatus(); }
+
+	const auto &aid_src_baro_hgt() const { return _aid_src_baro_hgt; }
+	const auto &aid_src_rng_hgt() const { return _aid_src_rng_hgt; }
+
+	const auto &aid_src_fake_pos() const { return _aid_src_fake_pos; }
 
 	const auto &aid_src_gnss_vel() const { return _aid_src_gnss_vel; }
 	const auto &aid_src_gnss_pos() const { return _aid_src_gnss_pos; }
-
-	const auto &aid_src_fake_pos() const { return _aid_src_fake_pos; }
 
 private:
 
@@ -386,6 +392,7 @@ private:
 	// booleans true when fresh sensor data is available at the fusion time horizon
 	bool _gps_data_ready{false};	///< true when new GPS data has fallen behind the fusion time horizon and is available to be fused
 	bool _baro_data_ready{false};	///< true when new baro height data has fallen behind the fusion time horizon and is available to be fused
+	bool _rng_data_ready{false};
 	bool _flow_data_ready{false};	///< true when the leading edge of the optical flow integration period has fallen behind the fusion time horizon
 	bool _ev_data_ready{false};	///< true when new external vision system data has fallen behind the fusion time horizon and is available to be fused
 	bool _tas_data_ready{false};	///< true when new true airspeed data has fallen behind the fusion time horizon and is available to be fused
@@ -452,12 +459,6 @@ private:
 	Vector3f _ev_pos_innov{};	///< external vision position innovations (m)
 	Vector3f _ev_pos_innov_var{};	///< external vision position innovation variances (m**2)
 
-	float _baro_hgt_innov{};		///< baro hgt innovations (m)
-	float _baro_hgt_innov_var{};	///< baro hgt innovation variances (m**2)
-
-	float _rng_hgt_innov{};	///< range hgt innovations (m)
-	float _rng_hgt_innov_var{};	///< range hgt innovation variances (m**2)
-
 	Vector3f _aux_vel_innov{};	///< horizontal auxiliary velocity innovations: (m/sec)
 	Vector3f _aux_vel_innov_var{};	///< horizontal auxiliary velocity innovation variances: ((m/sec)**2)
 
@@ -493,10 +494,13 @@ private:
 	bool _inhibit_flow_use{false};	///< true when use of optical flow and range finder is being inhibited
 	Vector2f _flow_compensated_XY_rad{};	///< measured delta angle of the image about the X and Y body axes after removal of body rotation (rad), RH rotation is positive
 
-	estimator_aid_source_3d_s _aid_src_gnss_vel{};
-	estimator_aid_source_3d_s _aid_src_gnss_pos{};
+	estimator_aid_source_1d_s _aid_src_baro_hgt{};
+	estimator_aid_source_1d_s _aid_src_rng_hgt{};
 
 	estimator_aid_source_2d_s _aid_src_fake_pos{};
+
+	estimator_aid_source_3d_s _aid_src_gnss_vel{};
+	estimator_aid_source_3d_s _aid_src_gnss_pos{};
 
 	// output predictor states
 	Vector3f _delta_angle_corr{};	///< delta angle correction vector (rad)
@@ -644,9 +648,12 @@ private:
 	// fuse body frame drag specific forces for multi-rotor wind estimation
 	void fuseDrag(const dragSample &drag_sample);
 
-	void fuseBaroHgt();
-	void fuseRngHgt();
+	void fuseBaroHgt(estimator_aid_source_1d_s &baro_hgt);
+	void fuseRngHgt(estimator_aid_source_1d_s &range_hgt);
 	void fuseEvHgt();
+
+	void updateBaroHgt(const baroSample &baro_sample, estimator_aid_source_1d_s &baro_hgt);
+	void updateRngHgt(estimator_aid_source_1d_s &rng_hgt);
 
 	// fuse single velocity and position measurement
 	bool fuseVelPosHeight(const float innov, const float innov_var, const int obs_index);
@@ -1058,12 +1065,9 @@ private:
 	// Returns true if the reset was successful
 	bool resetYawToEKFGSF();
 
-	// Returns true if the output of the yaw emergency estimator can be used for a reset
-	bool isYawEmergencyEstimateAvailable() const;
-
 	void resetGpsDriftCheckFilters();
 
-	bool resetEstimatorAidStatusFlags(estimator_aid_source_1d_s &status)
+	bool resetEstimatorAidStatusFlags(estimator_aid_source_1d_s &status) const
 	{
 		if (status.timestamp_sample != 0) {
 			status.timestamp_sample = 0;
@@ -1077,7 +1081,7 @@ private:
 		return false;
 	}
 
-	void resetEstimatorAidStatus(estimator_aid_source_1d_s &status)
+	void resetEstimatorAidStatus(estimator_aid_source_1d_s &status) const
 	{
 		if (resetEstimatorAidStatusFlags(status)) {
 			status.observation = 0;
@@ -1090,7 +1094,7 @@ private:
 	}
 
 	template <typename T>
-	bool resetEstimatorAidStatusFlags(T &status)
+	bool resetEstimatorAidStatusFlags(T &status) const
 	{
 		if (status.timestamp_sample != 0) {
 			status.timestamp_sample = 0;
@@ -1108,7 +1112,7 @@ private:
 	}
 
 	template <typename T>
-	void resetEstimatorAidStatus(T &status)
+	void resetEstimatorAidStatus(T &status) const
 	{
 		if (resetEstimatorAidStatusFlags(status)) {
 			for (size_t i = 0; i < (sizeof(status.fusion_enabled) / sizeof(status.fusion_enabled[0])); i++) {
@@ -1119,6 +1123,21 @@ private:
 				status.innovation_variance[i] = 0;
 				status.test_ratio[i] = 0;
 			}
+		}
+	}
+
+	void setEstimatorAidStatusTestRatio(estimator_aid_source_1d_s &status, float innovation_gate) const
+	{
+		status.test_ratio = sq(status.innovation) / (sq(innovation_gate) * status.innovation_variance);
+		status.innovation_rejected = (status.test_ratio > 1.f);
+	}
+
+	template <typename T>
+	void setEstimatorAidStatusTestRatio(T &status, float innovation_gate) const
+	{
+		for (size_t i = 0; i < (sizeof(status.test_ratio) / sizeof(status.test_ratio[0])); i++) {
+			status.test_ratio[i] = sq(status.innovation[i]) / (sq(innovation_gate) * status.innovation_variance[i]);
+			status.innovation_rejected[i] = (status.test_ratio[i] > 1.f);
 		}
 	}
 };

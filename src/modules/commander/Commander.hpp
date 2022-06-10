@@ -41,6 +41,7 @@
 #include "state_machine_helper.h"
 #include "worker_thread.hpp"
 
+#include <containers/Bitset.hpp>
 #include <lib/controllib/blocks.hpp>
 #include <lib/hysteresis/hysteresis.h>
 #include <lib/mathlib/mathlib.h>
@@ -347,7 +348,7 @@ private:
 
 	uint8_t		_battery_warning{battery_status_s::BATTERY_WARNING_NONE};
 	hrt_abstime	_battery_failsafe_timestamp{0};
-	uint8_t		_last_connected_batteries{0};
+	px4::Bitset<battery_status_s::MAX_INSTANCES> _last_connected_batteries;
 	uint32_t	_last_battery_custom_fault[battery_status_s::MAX_INSTANCES] {};
 	uint16_t	_last_battery_fault[battery_status_s::MAX_INSTANCES] {};
 	uint8_t		_last_battery_mode[battery_status_s::MAX_INSTANCES] {};
@@ -391,18 +392,18 @@ private:
 
 	geofence_result_s	_geofence_result{};
 	vehicle_land_detected_s	_vehicle_land_detected{};
-	vtol_vehicle_status_s	_vtol_status{};
+	vtol_vehicle_status_s	_vtol_vehicle_status{};
 
 	hrt_abstime _last_wind_warning{0};
 
 	// commander publications
-	actuator_armed_s        _armed{};
-	commander_state_s       _internal_state{};
+	actuator_armed_s        _actuator_armed{};
+	commander_state_s       _commander_state{};
 	vehicle_control_mode_s  _vehicle_control_mode{};
-	vehicle_status_s        _status{};
-	vehicle_status_flags_s  _status_flags{};
+	vehicle_status_s        _vehicle_status{};
+	vehicle_status_flags_s  _vehicle_status_flags{};
 
-	Safety _safety{};
+	Safety _safety;
 
 	WorkerThread _worker_thread;
 
@@ -442,18 +443,18 @@ private:
 	uORB::SubscriptionData<vehicle_local_position_s>	_local_position_sub{ORB_ID(vehicle_local_position)};
 
 	// Publications
-	uORB::Publication<actuator_armed_s>			_armed_pub{ORB_ID(actuator_armed)};
+	uORB::Publication<actuator_armed_s>			_actuator_armed_pub{ORB_ID(actuator_armed)};
 	uORB::Publication<commander_state_s>			_commander_state_pub{ORB_ID(commander_state)};
 	uORB::Publication<failure_detector_status_s>		_failure_detector_status_pub{ORB_ID(failure_detector_status)};
 	uORB::Publication<test_motor_s>				_test_motor_pub{ORB_ID(test_motor)};
 	uORB::Publication<actuator_test_s>			_actuator_test_pub{ORB_ID(actuator_test)};
-	uORB::Publication<vehicle_control_mode_s>		_control_mode_pub{ORB_ID(vehicle_control_mode)};
+	uORB::Publication<vehicle_control_mode_s>		_vehicle_control_mode_pub{ORB_ID(vehicle_control_mode)};
 	uORB::Publication<vehicle_status_flags_s>		_vehicle_status_flags_pub{ORB_ID(vehicle_status_flags)};
-	uORB::Publication<vehicle_status_s>			_status_pub{ORB_ID(vehicle_status)};
+	uORB::Publication<vehicle_status_s>			_vehicle_status_pub{ORB_ID(vehicle_status)};
 
-	uORB::PublicationData<home_position_s>			_home_pub{ORB_ID(home_position)};
+	uORB::PublicationData<home_position_s>			_home_position_pub{ORB_ID(home_position)};
 
-	uORB::Publication<vehicle_command_ack_s>		_command_ack_pub{ORB_ID(vehicle_command_ack)};
+	uORB::Publication<vehicle_command_ack_s>		_vehicle_command_ack_pub{ORB_ID(vehicle_command_ack)};
 
 	orb_advert_t _mavlink_log_pub{nullptr};
 

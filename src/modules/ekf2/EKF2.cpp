@@ -636,12 +636,19 @@ void EKF2::Run()
 
 void EKF2::PublishAidSourceStatus(const hrt_abstime &timestamp)
 {
+	// baro height
+	PublishAidSourceStatus(_ekf.aid_src_baro_hgt(), _status_baro_hgt_pub_last, _estimator_aid_src_baro_hgt_pub);
+
+	// RNG height
+	PublishAidSourceStatus(_ekf.aid_src_rng_hgt(), _status_rng_hgt_pub_last, _estimator_aid_src_rng_hgt_pub);
+
+	// fake position
+	PublishAidSourceStatus(_ekf.aid_src_fake_pos(), _status_fake_pos_pub_last, _estimator_aid_src_fake_pos_pub);
+
 	// GNSS velocity & position
 	PublishAidSourceStatus(_ekf.aid_src_gnss_vel(), _status_gnss_vel_pub_last, _estimator_aid_src_gnss_vel_pub);
 	PublishAidSourceStatus(_ekf.aid_src_gnss_pos(), _status_gnss_pos_pub_last, _estimator_aid_src_gnss_pos_pub);
 
-	// fake position
-	PublishAidSourceStatus(_ekf.aid_src_fake_pos(), _status_fake_pos_pub_last, _estimator_aid_src_fake_pos_pub);
 }
 
 void EKF2::PublishAttitude(const hrt_abstime &timestamp)
@@ -869,6 +876,11 @@ void EKF2::PublishInnovations(const hrt_abstime &timestamp)
 		_preflt_checker.setUsingFlowAiding(_ekf.control_status_flags().opt_flow);
 		_preflt_checker.setUsingEvPosAiding(_ekf.control_status_flags().ev_pos);
 		_preflt_checker.setUsingEvVelAiding(_ekf.control_status_flags().ev_vel);
+
+		_preflt_checker.setUsingBaroHgtAiding(_ekf.control_status_flags().baro_hgt);
+		_preflt_checker.setUsingGpsHgtAiding(_ekf.control_status_flags().gps_hgt);
+		_preflt_checker.setUsingRngHgtAiding(_ekf.control_status_flags().rng_hgt);
+		_preflt_checker.setUsingEvHgtAiding(_ekf.control_status_flags().ev_hgt);
 
 		_preflt_checker.update(_ekf.get_imu_sample_delayed().delta_ang_dt, innovations);
 
@@ -1377,6 +1389,7 @@ void EKF2::PublishYawEstimatorStatus(const hrt_abstime &timestamp)
 			       yaw_est_test_data.innov_vn, yaw_est_test_data.innov_ve,
 			       yaw_est_test_data.weight)) {
 
+		yaw_est_test_data.yaw_composite_valid = _ekf.isYawEmergencyEstimateAvailable();
 		yaw_est_test_data.timestamp_sample = _ekf.get_imu_sample_delayed().time_us;
 		yaw_est_test_data.timestamp = _replay_mode ? timestamp : hrt_absolute_time();
 

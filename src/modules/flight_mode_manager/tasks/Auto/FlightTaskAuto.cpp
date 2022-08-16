@@ -146,11 +146,8 @@ bool FlightTaskAuto::update()
 		_velocity_setpoint(2) = NAN;
 		break;
 
-	case WaypointType::takeoff:
-		// Takeoff is completely defined by target position
-		_gear.landing_gear = landing_gear_s::GEAR_DOWN;
-
 	// FALLTHROUGH
+	case WaypointType::takeoff:
 	case WaypointType::loiter:
 	case WaypointType::position:
 	default:
@@ -345,12 +342,11 @@ bool FlightTaskAuto::_evaluateTriplets()
 	const float cruise_speed_from_triplet = _sub_triplet_setpoint.get().current.cruising_speed;
 
 	if (PX4_ISFINITE(cruise_speed_from_triplet)
-	    && (cruise_speed_from_triplet > 0.f)
 	    && (_sub_triplet_setpoint.get().current.timestamp > _time_last_cruise_speed_override)) {
 		_mc_cruise_speed = cruise_speed_from_triplet;
 	}
 
-	if (!PX4_ISFINITE(_mc_cruise_speed) || (_mc_cruise_speed < 0.0f)) {
+	if (!PX4_ISFINITE(_mc_cruise_speed) || (_mc_cruise_speed < FLT_EPSILON)) {
 		// If no speed is planned use the default cruise speed as limit
 		_mc_cruise_speed = _param_mpc_xy_cruise.get();
 	}
@@ -787,7 +783,7 @@ bool FlightTaskAuto::isTargetModified() const
 {
 	const bool xy_modified = (_target - _position_setpoint).xy().longerThan(FLT_EPSILON);
 	const bool z_valid = PX4_ISFINITE(_position_setpoint(2));
-	const bool z_modified =  z_valid && fabs((_target - _position_setpoint)(2)) > FLT_EPSILON;
+	const bool z_modified =  z_valid && std::fabs((_target - _position_setpoint)(2)) > FLT_EPSILON;
 
 	return xy_modified || z_modified;
 }

@@ -83,7 +83,7 @@
 #include <uORB/topics/vehicle_attitude.h>
 #include <uORB/topics/vehicle_command.h>
 #include <uORB/topics/vehicle_global_position.h>
-#include <uORB/topics/vehicle_gps_position.h>
+#include <uORB/topics/sensor_gps.h>
 #include <uORB/topics/vehicle_imu.h>
 #include <uORB/topics/vehicle_land_detected.h>
 #include <uORB/topics/vehicle_local_position.h>
@@ -144,7 +144,7 @@ private:
 	void PublishInnovationTestRatios(const hrt_abstime &timestamp);
 	void PublishInnovationVariances(const hrt_abstime &timestamp);
 	void PublishLocalPosition(const hrt_abstime &timestamp);
-	void PublishOdometry(const hrt_abstime &timestamp, const imuSample &imu);
+	void PublishOdometry(const hrt_abstime &timestamp);
 	void PublishOdometryAligned(const hrt_abstime &timestamp, const vehicle_odometry_s &ev_odom);
 	void PublishOpticalFlowVel(const hrt_abstime &timestamp);
 	void PublishSensorBias(const hrt_abstime &timestamp);
@@ -247,20 +247,26 @@ private:
 	Vector3f _last_gyro_bias_published{};
 	Vector3f _last_mag_bias_published{};
 
-	Vector3f _last_accel_calibration_published{};
-	Vector3f _last_gyro_calibration_published{};
-	Vector3f _last_mag_calibration_published{};
-
 	hrt_abstime _last_sensor_bias_published{0};
 	hrt_abstime _last_gps_status_published{0};
+
+	hrt_abstime _status_airspeed_pub_last{0};
 
 	hrt_abstime _status_baro_hgt_pub_last{0};
 	hrt_abstime _status_rng_hgt_pub_last{0};
 
 	hrt_abstime _status_fake_pos_pub_last{0};
 
+	hrt_abstime _status_ev_yaw_pub_last{0};
+
+	hrt_abstime _status_gnss_yaw_pub_last{0};
 	hrt_abstime _status_gnss_vel_pub_last{0};
 	hrt_abstime _status_gnss_pos_pub_last{0};
+
+	hrt_abstime _status_mag_pub_last{0};
+	hrt_abstime _status_mag_heading_pub_last{0};
+
+	hrt_abstime _status_aux_vel_pub_last{0};
 
 	float _last_baro_bias_published{};
 
@@ -320,13 +326,22 @@ private:
 	uORB::PublicationMulti<vehicle_optical_flow_vel_s> _estimator_optical_flow_vel_pub{ORB_ID(estimator_optical_flow_vel)};
 	uORB::PublicationMulti<yaw_estimator_status_s>       _yaw_est_pub{ORB_ID(yaw_estimator_status)};
 
+	uORB::PublicationMulti<estimator_aid_source_1d_s> _estimator_aid_src_airspeed_pub{ORB_ID(estimator_aid_src_airspeed)};
 	uORB::PublicationMulti<estimator_aid_source_1d_s> _estimator_aid_src_baro_hgt_pub{ORB_ID(estimator_aid_src_baro_hgt)};
 	uORB::PublicationMulti<estimator_aid_source_1d_s> _estimator_aid_src_rng_hgt_pub{ORB_ID(estimator_aid_src_rng_hgt)};
 
 	uORB::PublicationMulti<estimator_aid_source_2d_s> _estimator_aid_src_fake_pos_pub{ORB_ID(estimator_aid_src_fake_pos)};
 
+	uORB::PublicationMulti<estimator_aid_source_1d_s> _estimator_aid_src_gnss_yaw_pub{ORB_ID(estimator_aid_src_gnss_yaw)};
 	uORB::PublicationMulti<estimator_aid_source_3d_s> _estimator_aid_src_gnss_vel_pub{ORB_ID(estimator_aid_src_gnss_vel)};
 	uORB::PublicationMulti<estimator_aid_source_3d_s> _estimator_aid_src_gnss_pos_pub{ORB_ID(estimator_aid_src_gnss_pos)};
+
+	uORB::PublicationMulti<estimator_aid_source_1d_s> _estimator_aid_src_mag_heading_pub{ORB_ID(estimator_aid_src_mag_heading)};
+	uORB::PublicationMulti<estimator_aid_source_3d_s> _estimator_aid_src_mag_pub{ORB_ID(estimator_aid_src_mag)};
+
+	uORB::PublicationMulti<estimator_aid_source_1d_s> _estimator_aid_src_ev_yaw_pub{ORB_ID(estimator_aid_src_ev_yaw)};
+
+	uORB::PublicationMulti<estimator_aid_source_3d_s> _estimator_aid_src_aux_vel_pub{ORB_ID(estimator_aid_src_aux_vel)};
 
 	// publications with topic dependent on multi-mode
 	uORB::PublicationMulti<vehicle_attitude_s>           _attitude_pub;
@@ -359,7 +374,7 @@ private:
 		(ParamExtFloat<px4::params::EKF2_EV_DELAY>)
 		_param_ekf2_ev_delay,	///< off-board vision measurement delay relative to the IMU (mSec)
 		(ParamExtFloat<px4::params::EKF2_AVEL_DELAY>)
-		_param_ekf2_avel_delay,	///< auxillary velocity measurement delay relative to the IMU (mSec)
+		_param_ekf2_avel_delay,	///< auxiliary velocity measurement delay relative to the IMU (mSec)
 
 		(ParamExtFloat<px4::params::EKF2_GYR_NOISE>)
 		_param_ekf2_gyr_noise,	///< IMU angular rate noise used for covariance prediction (rad/sec)

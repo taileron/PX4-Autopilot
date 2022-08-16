@@ -179,6 +179,8 @@ private:
 	unsigned		_max_transfer{16};		///< Maximum number of I2C transfers supported by PX4IO
 
 	int			_class_instance{-1};
+	bool			_first_param_update{true};
+	uint32_t    		_group_channels[PX4IO_P_SETUP_PWM_RATE_GROUP3 - PX4IO_P_SETUP_PWM_RATE_GROUP0 + 1] {};
 
 	hrt_abstime		_poll_last{0};
 
@@ -477,6 +479,12 @@ int PX4IO::init()
 		return ret;
 	}
 
+	/* initialize _group_channels */
+	for (uint8_t group = PX4IO_P_SETUP_PWM_RATE_GROUP0; group <= PX4IO_P_SETUP_PWM_RATE_GROUP3; ++group) {
+		unsigned group_idx = group - PX4IO_P_SETUP_PWM_RATE_GROUP0;
+		_group_channels[group_idx] = io_reg_get(PX4IO_PAGE_PWM_INFO, PX4IO_RATE_MAP_BASE + group_idx);
+	}
+
 	/* try to claim the generic PWM output device node as well - it's OK if we fail at this */
 	if (_param_sys_hitl.get() <= 0 && _param_sys_use_io.get() == 1) {
 		_class_instance = register_class_devname(PWM_OUTPUT_BASE_DEVICE_PATH);
@@ -530,11 +538,6 @@ void PX4IO::Run()
 
 	perf_begin(_cycle_perf);
 	perf_count(_interval_perf);
-
-	// schedule minimal update rate if there are no actuator controls
-	if (!_mixing_output.useDynamicMixing()) {
-		ScheduleDelayed(20_ms);
-	}
 
 	/* if we have new control data from the ORB, handle it */
 	if (_param_sys_hitl.get() <= 0) {
@@ -590,10 +593,10 @@ void PX4IO::Run()
 
 				/* publish ACK */
 				if (dsm_ret == OK) {
-					answer_command(cmd, vehicle_command_s::VEHICLE_CMD_RESULT_ACCEPTED);
+					answer_command(cmd, vehicle_command_ack_s::VEHICLE_CMD_RESULT_ACCEPTED);
 
 				} else {
-					answer_command(cmd, vehicle_command_s::VEHICLE_CMD_RESULT_FAILED);
+					answer_command(cmd, vehicle_command_ack_s::VEHICLE_CMD_RESULT_FAILED);
 				}
 			}
 		}
@@ -609,8 +612,6 @@ void PX4IO::Run()
 			_parameter_update_sub.copy(&pupdate);
 
 			_param_update_force = false;
-
-			ModuleParams::updateParams();
 
 			update_params();
 
@@ -653,6 +654,9 @@ void PX4IO::Run()
 	}
 
 	_mixing_output.updateSubscriptions(true, true);
+
+	// minimal backup scheduling
+	ScheduleDelayed(20_ms);
 
 	perf_end(_cycle_perf);
 }
@@ -701,13 +705,66 @@ void PX4IO::updateTimerRateGroups()
 
 void PX4IO::update_params()
 {
+	uint32_t previously_set_functions = 0;
+
+	for (size_t i = 0; i < _max_actuators; i++) {
+		previously_set_functions |= (uint32_t)_mixing_output.isFunctionSet(i) << i;
+	}
+
+	updateParams();
+
 	if (!_mixing_output.armed().armed && _mixing_output.useDynamicMixing()) {
+
+		// Automatically set the PWM rate and disarmed value when a channel is first set to a servo
+		if (!_first_param_update) {
+			for (size_t i = 0; i < _max_actuators; i++) {
+				if ((previously_set_functions & (1u << i)) == 0 && _mixing_output.functionParamHandle(i) != PARAM_INVALID) {
+					int32_t output_function;
+
+					if (param_get(_mixing_output.functionParamHandle(i), &output_function) == 0
+					    && output_function >= (int)OutputFunction::Servo1
+					    && output_function <= (int)OutputFunction::ServoMax) { // Function got set to a servo
+						int32_t val = 1500;
+						PX4_INFO("Setting disarmed to %i for channel %i", (int) val, i);
+						param_set(_mixing_output.disarmedParamHandle(i), &val);
+
+						// If the whole timer group was not set previously, then set the pwm rate to 50 Hz
+						for (int timer = 0; timer < (int)(sizeof(_group_channels) / sizeof(_group_channels[0])); ++timer) {
+
+							uint32_t channels = _group_channels[timer];
+
+							if ((channels & (1u << i)) == 0) {
+								continue;
+							}
+
+							if ((channels & previously_set_functions) == 0) { // None of the channels was set
+								char param_name[17];
+								snprintf(param_name, sizeof(param_name), "%s_TIM%u", _mixing_output.paramPrefix(), timer);
+
+								int32_t tim_config = 0;
+								param_t handle = param_find(param_name);
+
+								if (param_get(handle, &tim_config) == 0 && tim_config == 400) {
+									tim_config = 50;
+									PX4_INFO("setting timer %i to %i Hz", timer, (int) tim_config);
+									param_set(handle, &tim_config);
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
 		// sync params to IO
 		updateTimerRateGroups();
 		updateFailsafe();
 		updateDisarmed();
+		_first_param_update = false;
 		return;
 	}
+
+	_first_param_update = false;
 
 	// skip update when armed or PWM disabled
 	if (_mixing_output.armed().armed || _class_instance == -1 || _mixing_output.useDynamicMixing()) {
@@ -788,37 +845,6 @@ void PX4IO::update_params()
 		_pwm_max_configured = true;
 	}
 
-	// PWM_MAIN_FAILx
-	if (!_pwm_fail_configured) {
-		for (unsigned i = 0; i < _max_actuators; i++) {
-			sprintf(str, "%s_FAIL%u", prefix, i + 1);
-			int32_t pwm_fail = -1;
-
-			if (param_get(param_find(str), &pwm_fail) == PX4_OK) {
-				if (pwm_fail >= 0) {
-					_mixing_output.failsafeValue(i) = math::constrain(pwm_fail, static_cast<int32_t>(0),
-									  static_cast<int32_t>(PWM_HIGHEST_MAX));
-
-					if (pwm_fail != _mixing_output.failsafeValue(i)) {
-						int32_t pwm_fail_new = _mixing_output.failsafeValue(i);
-						param_set(param_find(str), &pwm_fail_new);
-					}
-
-				} else {
-					if (pwm_default_channel_mask & 1 << i) {
-						_mixing_output.failsafeValue(i) = PWM_MOTOR_OFF;
-
-					} else {
-						_mixing_output.failsafeValue(i) = PWM_SERVO_STOP;
-					}
-				}
-			}
-		}
-
-		_pwm_fail_configured = true;
-		updateFailsafe();
-	}
-
 	// PWM_MAIN_DISx
 	if (!_pwm_dis_configured) {
 		for (unsigned i = 0; i < _max_actuators; i++) {
@@ -843,6 +869,33 @@ void PX4IO::update_params()
 
 		_pwm_dis_configured = true;
 		updateDisarmed();
+	}
+
+	// PWM_MAIN_FAILx
+	if (!_pwm_fail_configured) {
+		for (unsigned i = 0; i < _max_actuators; i++) {
+			sprintf(str, "%s_FAIL%u", prefix, i + 1);
+			int32_t pwm_fail = -1;
+
+			if (param_get(param_find(str), &pwm_fail) == PX4_OK) {
+				if (pwm_fail >= 0) {
+					_mixing_output.failsafeValue(i) = math::constrain(pwm_fail, static_cast<int32_t>(0),
+									  static_cast<int32_t>(PWM_HIGHEST_MAX));
+
+					if (pwm_fail != _mixing_output.failsafeValue(i)) {
+						int32_t pwm_fail_new = _mixing_output.failsafeValue(i);
+						param_set(param_find(str), &pwm_fail_new);
+					}
+
+				} else {
+					// if no channel specific failsafe value is configured, use the disarmed value
+					_mixing_output.failsafeValue(i) = _mixing_output.disarmedValue(i);
+				}
+			}
+		}
+
+		_pwm_fail_configured = true;
+		updateFailsafe();
 	}
 
 	// PWM_MAIN_REVx

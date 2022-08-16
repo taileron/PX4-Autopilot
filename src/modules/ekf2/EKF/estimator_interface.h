@@ -245,6 +245,8 @@ public:
 
 	// Getters for samples on the delayed time horizon
 	const imuSample &get_imu_sample_delayed() const { return _imu_sample_delayed; }
+	const imuSample &get_imu_sample_newest() const { return _newest_high_rate_imu_sample; }
+
 	const baroSample &get_baro_sample_delayed() const { return _baro_sample_delayed; }
 	const gpsSample &get_gps_sample_delayed() const { return _gps_sample_delayed; }
 
@@ -328,14 +330,10 @@ protected:
 	float _gps_yaw_offset{0.0f};	// Yaw offset angle for dual GPS antennas used for yaw estimation (radians).
 
 	// innovation consistency check monitoring ratios
-	float _yaw_test_ratio{};		// yaw innovation consistency check ratio
-	AlphaFilter<float> _yaw_signed_test_ratio_lpf{0.1f}; // average signed test ratio used to detect a bias in the state
-	Vector3f _mag_test_ratio{};		// magnetometer XYZ innovation consistency check ratios
+	AlphaFilter<float> _gnss_yaw_signed_test_ratio_lpf{0.1f}; // average signed test ratio used to detect a bias in the state
 	Vector2f _ev_vel_test_ratio{};		// EV velocity innovation consistency check ratios
 	Vector2f _ev_pos_test_ratio{};		// EV position innovation consistency check ratios
-	Vector2f _aux_vel_test_ratio{};		// Auxiliary horizontal velocity innovation consistency check ratio
 	float _optflow_test_ratio{};		// Optical flow innovation consistency check ratio
-	float _tas_test_ratio{};		// tas innovation consistency check ratio
 	float _hagl_test_ratio{};		// height above terrain measurement innovation consistency check ratio
 	float _beta_test_ratio{};		// sideslip innovation consistency check ratio
 	Vector2f _drag_test_ratio{};		// drag innovation consistency check ratio

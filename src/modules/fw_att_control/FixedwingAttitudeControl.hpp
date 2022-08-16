@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (c) 2013-2019 PX4 Development Team. All rights reserved.
+ *   Copyright (c) 2013-2022 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -48,7 +48,7 @@
 #include <px4_platform_common/module_params.h>
 #include <px4_platform_common/posix.h>
 #include <px4_platform_common/tasks.h>
-#include <px4_platform_common/px4_work_queue/WorkItem.hpp>
+#include <px4_platform_common/px4_work_queue/ScheduledWorkItem.hpp>
 #include <uORB/Publication.hpp>
 #include <uORB/PublicationMulti.hpp>
 #include <uORB/Subscription.hpp>
@@ -83,7 +83,7 @@ static constexpr float kFlapSlewRate = 1.f; //minimum time from none to full fla
 static constexpr float kSpoilerSlewRate = 1.f; //minimum time from none to full spoiler deflection [s]
 
 class FixedwingAttitudeControl final : public ModuleBase<FixedwingAttitudeControl>, public ModuleParams,
-	public px4::WorkItem
+	public px4::ScheduledWorkItem
 {
 public:
 	FixedwingAttitudeControl(bool vtol = false);
@@ -131,15 +131,17 @@ private:
 	uORB::Publication<vehicle_thrust_setpoint_s>	_vehicle_thrust_setpoint_pub{ORB_ID(vehicle_thrust_setpoint)};
 	uORB::Publication<vehicle_torque_setpoint_s>	_vehicle_torque_setpoint_pub{ORB_ID(vehicle_torque_setpoint)};
 
-	actuator_controls_s			_actuator_controls {};		/**< actuator control inputs */
-	manual_control_setpoint_s		_manual_control_setpoint {};	/**< r/c channel data */
-	vehicle_attitude_setpoint_s		_att_sp {};			/**< vehicle attitude setpoint */
-	vehicle_control_mode_s			_vcontrol_mode {};		/**< vehicle control mode */
-	vehicle_local_position_s		_local_pos {};			/**< local position */
-	vehicle_rates_setpoint_s		_rates_sp {};			/* attitude rates setpoint */
-	vehicle_status_s			_vehicle_status {};		/**< vehicle status */
+	actuator_controls_s			_actuator_controls{};
+	manual_control_setpoint_s		_manual_control_setpoint{};
+	vehicle_attitude_setpoint_s		_att_sp{};
+	vehicle_control_mode_s			_vcontrol_mode{};
+	vehicle_local_position_s		_local_pos{};
+	vehicle_rates_setpoint_s		_rates_sp{};
+	vehicle_status_s			_vehicle_status{};
 
-	perf_counter_t	_loop_perf;						/**< loop performance counter */
+	matrix::Dcmf _R{matrix::eye<float, 3>()};
+
+	perf_counter_t _loop_perf;
 
 	hrt_abstime _last_run{0};
 

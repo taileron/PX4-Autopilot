@@ -142,7 +142,8 @@ void Ekf::controlFusionModes()
 			_range_sensor.setRange(_range_sensor.getRange() + pos_offset_earth(2) / _range_sensor.getCosTilt());
 
 			// Run the kinematic consistency check when not moving horizontally
-			if ((sq(_state.vel(0)) + sq(_state.vel(1)) < fmaxf(P(4, 4) + P(5, 5), 0.1f))) {
+			if (_control_status.flags.in_air && !_control_status.flags.fixed_wing
+			    && (sq(_state.vel(0)) + sq(_state.vel(1)) < fmaxf(P(4, 4) + P(5, 5), 0.1f))) {
 				_rng_consistency_check.setGate(_params.range_kin_consistency_gate);
 				_rng_consistency_check.update(_range_sensor.getDistBottom(), getRngHeightVariance(), _state.vel(2), P(6, 6), _time_last_imu);
 			}
@@ -188,6 +189,8 @@ void Ekf::controlFusionModes()
 
 	// Additional horizontal velocity data from an auxiliary sensor can be fused
 	controlAuxVelFusion();
+
+	controlZeroInnovationHeadingUpdate();
 
 	controlZeroVelocityUpdate();
 
@@ -358,24 +361,41 @@ void Ekf::controlExternalVisionFusion()
 		}
 
 		// determine if we should use the yaw observation
-		if (_control_status.flags.ev_yaw) {
-			if (reset && _control_status_prev.flags.ev_yaw) {
-				resetYawToEv();
-			}
+		resetEstimatorAidStatus(_aid_src_ev_yaw);
+		const float measured_hdg = getEulerYaw(_ev_sample_delayed.quat);
+		const float ev_yaw_obs_var = fmaxf(_ev_sample_delayed.angVar, 1.e-4f);
 
-			if (shouldUse321RotationSequence(_R_to_earth)) {
-				float measured_hdg = getEuler321Yaw(_ev_sample_delayed.quat);
-				fuseYaw321(measured_hdg, _ev_sample_delayed.angVar);
+		if (PX4_ISFINITE(measured_hdg)) {
+			_aid_src_ev_yaw.timestamp_sample = _ev_sample_delayed.time_us;
+			_aid_src_ev_yaw.observation = measured_hdg;
+			_aid_src_ev_yaw.observation_variance = ev_yaw_obs_var;
+			_aid_src_ev_yaw.fusion_enabled = _control_status.flags.ev_yaw;
+
+			if (_control_status.flags.ev_yaw) {
+				if (reset && _control_status_prev.flags.ev_yaw) {
+					resetYawToEv();
+				}
+
+				const float innovation = wrap_pi(getEulerYaw(_R_to_earth) - measured_hdg);
+
+				fuseYaw(innovation, ev_yaw_obs_var, _aid_src_ev_yaw);
 
 			} else {
-				float measured_hdg = getEuler312Yaw(_ev_sample_delayed.quat);
-				fuseYaw312(measured_hdg, _ev_sample_delayed.angVar);
+				// populate estimator_aid_src_ev_yaw with delta heading innovations for logging
+				// use the change in yaw since the last measurement
+				const float measured_hdg_prev = getEulerYaw(_ev_sample_delayed_prev.quat);
+
+				// calculate the change in yaw since the last measurement
+				const float ev_delta_yaw = wrap_pi(measured_hdg - measured_hdg_prev);
+
+				_aid_src_ev_yaw.innovation = wrap_pi(getEulerYaw(_R_to_earth) - _yaw_pred_prev - ev_delta_yaw);
 			}
 		}
 
 		// record observation and estimate for use next time
 		_ev_sample_delayed_prev = _ev_sample_delayed;
 		_hpos_pred_prev = _state.pos.xy();
+		_yaw_pred_prev = getEulerYaw(_state.quat_nominal);
 
 	} else if ((_control_status.flags.ev_pos || _control_status.flags.ev_vel ||  _control_status.flags.ev_yaw)
 		   && isTimedOut(_time_last_ext_vision, (uint64_t)_params.reset_timeout_max)) {
@@ -584,7 +604,7 @@ void Ekf::controlGpsYawFusion(bool gps_checks_passing, bool gps_checks_failing)
 
 				fuseGpsYaw();
 
-				const bool is_fusion_failing = isTimedOut(_time_last_gps_yaw_fuse, _params.reset_timeout_max);
+				const bool is_fusion_failing = isTimedOut(_aid_src_gnss_yaw.time_last_fuse, _params.reset_timeout_max);
 
 				if (is_fusion_failing) {
 					if (_nb_gps_yaw_reset_available > 0) {
@@ -1009,7 +1029,7 @@ void Ekf::controlAirDataFusion()
 	// control activation and initialisation/reset of wind states required for airspeed fusion
 
 	// If both airspeed and sideslip fusion have timed out and we are not using a drag observation model then we no longer have valid wind estimates
-	const bool airspeed_timed_out = isTimedOut(_time_last_arsp_fuse, (uint64_t)10e6);
+	const bool airspeed_timed_out = isTimedOut(_aid_src_airspeed.time_last_fuse, (uint64_t)10e6);
 	const bool sideslip_timed_out = isTimedOut(_time_last_beta_fuse, (uint64_t)10e6);
 
 	if (_using_synthetic_position || (airspeed_timed_out && sideslip_timed_out && !(_params.fusion_mode & SensorFusionMask::USE_DRAG))) {
@@ -1022,17 +1042,23 @@ void Ekf::controlAirDataFusion()
 	}
 
 	if (_tas_data_ready) {
+		updateAirspeed(_airspeed_sample_delayed, _aid_src_airspeed);
+
+		_innov_check_fail_status.flags.reject_airspeed = _aid_src_airspeed.innovation_rejected; // TODO: remove this redundant flag
+
 		const bool continuing_conditions_passing = _control_status.flags.in_air && _control_status.flags.fixed_wing && !_using_synthetic_position;
 		const bool is_airspeed_significant = _airspeed_sample_delayed.true_airspeed > _params.arsp_thr;
-		const bool starting_conditions_passing = continuing_conditions_passing && is_airspeed_significant;
+		const bool is_airspeed_consistent = (_aid_src_airspeed.test_ratio > 0.f && _aid_src_airspeed.test_ratio < 1.f);
+		const bool starting_conditions_passing = continuing_conditions_passing && is_airspeed_significant
+		                                         && (is_airspeed_consistent || !_control_status.flags.wind); // if wind isn't already estimated, the states are reset when starting airspeed fusion
 
 		if (_control_status.flags.fuse_aspd) {
 			if (continuing_conditions_passing) {
 				if (is_airspeed_significant) {
-					fuseAirspeed();
+					fuseAirspeed(_aid_src_airspeed);
 				}
 
-				const bool is_fusion_failing = isTimedOut(_time_last_arsp_fuse, (uint64_t)10e6);
+				const bool is_fusion_failing = isTimedOut(_aid_src_airspeed.time_last_fuse, (uint64_t)10e6);
 
 				if (is_fusion_failing) {
 					stopAirspeedFusion();
@@ -1105,18 +1131,13 @@ void Ekf::controlAuxVelFusion()
 
 		if (_auxvel_buffer->pop_first_older_than(_imu_sample_delayed.time_us, &auxvel_sample_delayed)) {
 
+			updateVelocityAidSrcStatus(auxvel_sample_delayed.time_us, auxvel_sample_delayed.vel, auxvel_sample_delayed.velVar, fmaxf(_params.auxvel_gate, 1.f), _aid_src_aux_vel);
+
 			if (isHorizontalAidingActive()) {
-
-				const float aux_vel_innov_gate = fmaxf(_params.auxvel_gate, 1.f);
-
-				_aux_vel_innov = _state.vel - auxvel_sample_delayed.vel;
-
-				fuseHorizontalVelocity(_aux_vel_innov, aux_vel_innov_gate, auxvel_sample_delayed.velVar,
-						       _aux_vel_innov_var, _aux_vel_test_ratio);
-
-				// Can be enabled after bit for this is added to EKF_AID_MASK
-				// fuseVerticalVelocity(_aux_vel_innov, aux_vel_innov_gate, auxvel_sample_delayed.velVar,
-				//		_aux_vel_innov_var, _aux_vel_test_ratio);
+				_aid_src_aux_vel.fusion_enabled[0] = PX4_ISFINITE(auxvel_sample_delayed.vel(0));
+				_aid_src_aux_vel.fusion_enabled[1] = PX4_ISFINITE(auxvel_sample_delayed.vel(1));
+				_aid_src_aux_vel.fusion_enabled[2] = PX4_ISFINITE(auxvel_sample_delayed.vel(2));
+				fuseVelocity(_aid_src_aux_vel);
 			}
 		}
 	}
